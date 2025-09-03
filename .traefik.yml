@@ -1,5 +1,26 @@
-experimental:
-  plugins:
-    jwtChecker:
-      moduleName: github.com/pamdigitek-doomo/traefik-jwt
-      version: v0.1.0
+# The name of your plugin as displayed in the Plugins Catalog web UI.
+displayName: JWT Checker Middleware
+
+# For now, `middleware` is the only type available.
+type: middleware
+
+# The import path of your plugin.
+import: github.com/pamdigitek-doomo/traefik-jwt
+
+# A brief description of what your plugin is doing.
+summary: Middleware that validates JWT tokens in requests
+
+# Medias associated to the plugin (optional)
+iconPath: icon.png
+# bannerPath: jwt-banner.png
+
+# Configuration data for your plugin.
+# This is mandatory,
+# and Plugins Catalog will try to execute the plugin with the data you provide as part of its startup validity tests.
+testData:
+  Secret: "Key-Must-Be-at-least-32-bytes-in-length!"
+  Claims:
+    iss: "DinoChiesa.github.io"
+    aud: "sheniqua"
+  TokenLookup: "header:Authorization"
+  AuthScheme: "Bearer"
