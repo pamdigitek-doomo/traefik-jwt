@@ -5,7 +5,7 @@ displayName: JWT Checker Middleware
 type: middleware
 
 # The import path of your plugin.
-import: github.com/pamdigitek-doomo/traefik-jwt
+import: github.com/traefik/plugindemo
 
 # A brief description of what your plugin is doing.
 summary: Middleware that validates JWT tokens in requests

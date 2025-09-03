@@ -1,4 +1,4 @@
-module github.com/pamdigitek-doomo/traefik-jwt
+module github.com/traefik/plugindemo
 
 go 1.24.0
 
