@@ -1,1 +1,1 @@
-# Traefik Plugin for JWT Authentication
+# Doomo plugin for Traefik

@@ -1,11 +1,11 @@
 # The name of your plugin as displayed in the Plugins Catalog web UI.
-displayName: JWT Checker Middleware
+displayName: Doomo JWT Middleware
 
 # For now, `middleware` is the only type available.
 type: middleware
 
 # The import path of your plugin.
-import: github.com/traefik/plugindemo
+import: github.com/pamdigitek-doomo/traefik-jwt
 
 # A brief description of what your plugin is doing.
 summary: Middleware that validates JWT tokens in requests
