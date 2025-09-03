@@ -17,10 +17,10 @@ iconPath: icon.png
 # Configuration data for your plugin.
 # This is mandatory,
 # and Plugins Catalog will try to execute the plugin with the data you provide as part of its startup validity tests.
-testData:
-  Secret: "Key-Must-Be-at-least-32-bytes-in-length!"
-  Claims:
-    iss: "DinoChiesa.github.io"
-    aud: "sheniqua"
-  TokenLookup: "header:Authorization"
-  AuthScheme: "Bearer"
+testData: {}
+  # Secret: "Key-Must-Be-at-least-32-bytes-in-length!"
+  # Claims:
+  #   iss: "DinoChiesa.github.io"
+  #   aud: "sheniqua"
+  # TokenLookup: "header:Authorization"
+  # AuthScheme: "Bearer"
