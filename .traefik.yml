@@ -1,0 +1,5 @@
+experimental:
+  plugins:
+    jwtChecker:
+      moduleName: github.com/pamdigitek-doomo/traefik-jwt
+      version: v0.1.0
