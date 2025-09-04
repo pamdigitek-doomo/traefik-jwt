@@ -2,8 +2,6 @@ module github.com/pamdigitek-doomo/traefik-jwt
 
 go 1.24.0
 
-toolchain go1.24.6
-
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/valkey-io/valkey-go v1.0.64 // Removed due to build constraints error
