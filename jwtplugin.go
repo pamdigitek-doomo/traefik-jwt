@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/valkey-io/valkey-go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -18,8 +18,9 @@ type Config struct {
 	SecretName      string   `json:"secretName,omitempty"`
 	SecretNamespace string   `json:"secretNamespace,omitempty"`
 	SecretKey       string   `json:"secretKey,omitempty"`
-	ValkeyAddresses []string `json:"valkeyAddresses,omitempty"`
-	ValkeyPassword  string   `json:"valkeyPassword,omitempty"`
+	RedisAddresses  []string `json:"redisAddresses,omitempty"`
+	RedisPassword   string   `json:"redisPassword,omitempty"`
+	RedisDB         int      `json:"redisDB,omitempty"`
 	UidClaim        string   `json:"uidClaim,omitempty"`
 	JtiClaim        string   `json:"jtiClaim,omitempty"`
 }
@@ -29,19 +30,20 @@ func CreateConfig() *Config {
 		SecretName:      "jwt-secret",
 		SecretNamespace: "default",
 		SecretKey:       "jwt-secret-key",
-		ValkeyAddresses: []string{"valkey:6379"},
-		ValkeyPassword:  "",
+		RedisAddresses:  []string{"redis:6379"},
+		RedisPassword:   "",
+		RedisDB:         0,
 		UidClaim:        "uid",
 		JtiClaim:        "jti",
 	}
 }
 
 type JWTChecker struct {
-	next         http.Handler
-	name         string
-	config       *Config
-	valkeyClient valkey.Client
-	secret       []byte
+	next        http.Handler
+	name        string
+	config      *Config
+	redisClient *redis.Client
+	secret      []byte
 }
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
@@ -49,16 +51,16 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	if config.SecretName == "" || config.SecretNamespace == "" || config.SecretKey == "" {
 		return nil, fmt.Errorf("secretName, secretNamespace, and secretKey are required")
 	}
-	if len(config.ValkeyAddresses) == 0 {
-		return nil, fmt.Errorf("valkeyAddresses is required")
+	if len(config.RedisAddresses) == 0 {
+		return nil, fmt.Errorf("redisAddresses is required")
 	}
 
 	// Ambil config dari environment kalau ada (override)
-	if addr := os.Getenv("VALKEY_ADDR"); addr != "" {
-		config.ValkeyAddresses = []string{addr}
+	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
+		config.RedisAddresses = []string{addr}
 	}
-	if pw := os.Getenv("VALKEY_PASSWORD"); pw != "" {
-		config.ValkeyPassword = pw
+	if pw := os.Getenv("REDIS_PASSWORD"); pw != "" {
+		config.RedisPassword = pw
 	}
 
 	// Ambil secret dari Kubernetes
@@ -79,22 +81,28 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		return nil, fmt.Errorf("secret key %s not found in secret %s/%s", config.SecretKey, config.SecretNamespace, config.SecretName)
 	}
 
-	// Init Valkey client (dengan/ tanpa password)
-	client, err := valkey.NewClient(valkey.ClientOption{
-		InitAddress: config.ValkeyAddresses,
-		Password:    config.ValkeyPassword,
-		SelectDB:    0,
+	// Init Redis client
+	// Untuk single instance, gunakan address pertama
+	redisAddr := config.RedisAddresses[0]
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     redisAddr,
+		Password: config.RedisPassword,
+		DB:       config.RedisDB,
 	})
+
+	// Test koneksi
+	_, err = rdb.Ping(ctx).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Valkey client: %v", err)
+		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
 	}
 
 	return &JWTChecker{
-		next:         next,
-		name:         name,
-		config:       config,
-		valkeyClient: client,
-		secret:       secretValue,
+		next:        next,
+		name:        name,
+		config:      config,
+		redisClient: rdb,
+		secret:      secretValue,
 	}, nil
 }
 
@@ -136,12 +144,17 @@ func (p *JWTChecker) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Cek session di Valkey
-	cachedJTI, err := p.valkeyClient.Do(context.Background(), p.valkeyClient.B().Get().Key("session:"+uid).Build()).ToString()
+	// Cek session di Redis
+	cachedJTI, err := p.redisClient.Get(context.Background(), "session:"+uid).Result()
 	if err != nil {
-		http.Error(rw, "Unauthorized: no session", http.StatusUnauthorized)
+		if err == redis.Nil {
+			http.Error(rw, "Unauthorized: no session", http.StatusUnauthorized)
+		} else {
+			http.Error(rw, "Unauthorized: redis error", http.StatusUnauthorized)
+		}
 		return
 	}
+
 	if cachedJTI != jti {
 		http.Error(rw, "Unauthorized: invalid jti", http.StatusUnauthorized)
 		return

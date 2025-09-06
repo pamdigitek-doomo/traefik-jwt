@@ -11,7 +11,7 @@ import: github.com/pamdigitek-doomo/traefik-jwt
 summary: Middleware that validates JWT tokens in requests
 
 # Medias associated to the plugin (optional)
-iconPath: icon.png
+# iconPath: icon.png
 # bannerPath: jwt-banner.png
 
 # Configuration data for your plugin.
