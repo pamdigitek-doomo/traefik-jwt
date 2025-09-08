@@ -12,15 +12,12 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 type Config struct {
-	SecretName      string   `json:"secretName,omitempty"`
-	SecretNamespace string   `json:"secretNamespace,omitempty"`
-	SecretKey       string   `json:"secretKey,omitempty"`
+	SecretName      string   `json:"secretName,omitempty"`      // Deprecated if using env, but keep for compatibility
+	SecretNamespace string   `json:"secretNamespace,omitempty"` // Deprecated
+	SecretKey       string   `json:"secretKey,omitempty"`       // Deprecated
 	RedisAddresses  []string `json:"redisAddresses,omitempty"`
 	RedisPassword   string   `json:"redisPassword,omitempty"`
 	RedisDB         int      `json:"redisDB,omitempty"`
@@ -78,8 +75,13 @@ func (r *SimpleRedisClient) get(key string) (string, error) {
 		writer.Flush()
 
 		// Read AUTH response
-		if _, _, err := reader.ReadLine(); err != nil {
+		line, _, err := reader.ReadLine()
+		if err != nil {
 			return "", err
+		}
+		response := string(line)
+		if !strings.HasPrefix(response, "+") {
+			return "", fmt.Errorf("AUTH failed: %s", response)
 		}
 	}
 
@@ -93,8 +95,13 @@ func (r *SimpleRedisClient) get(key string) (string, error) {
 		writer.Flush()
 
 		// Read SELECT response
-		if _, _, err := reader.ReadLine(); err != nil {
+		line, _, err := reader.ReadLine()
+		if err != nil {
 			return "", err
+		}
+		response := string(line)
+		if !strings.HasPrefix(response, "+") {
+			return "", fmt.Errorf("SELECT failed: %s", response)
 		}
 	}
 
@@ -113,25 +120,40 @@ func (r *SimpleRedisClient) get(key string) (string, error) {
 
 	response := string(line)
 
-	// Handle different response types
-	if strings.HasPrefix(response, "$-1") {
-		return "", fmt.Errorf("key not found")
+	// Handle error response
+	if strings.HasPrefix(response, "-") {
+		return "", fmt.Errorf("Redis error: %s", strings.TrimPrefix(response, "-"))
 	}
 
+	// Handle simple string (e.g., +OK) - though for GET, it should be bulk
+	if strings.HasPrefix(response, "+") {
+		return "", fmt.Errorf("unexpected simple string for GET: %s", response)
+	}
+
+	// Handle bulk string or null
 	if strings.HasPrefix(response, "$") {
-		// Bulk string response - read the length and then the actual data
-		lengthStr := response[1:]
-		length, err := strconv.Atoi(lengthStr)
-		if err != nil {
-			return "", fmt.Errorf("invalid response format")
+		if strings.HasPrefix(response, "$-1") {
+			return "", fmt.Errorf("key not found")
 		}
 
-		if length <= 0 {
-			return "", fmt.Errorf("key not found")
+		lengthStr := strings.TrimPrefix(response, "$")
+		length, err := strconv.Atoi(lengthStr)
+		if err != nil {
+			return "", fmt.Errorf("invalid bulk length: %v", err)
+		}
+
+		if length < 0 {
+			return "", fmt.Errorf("key not found or negative length")
 		}
 
 		// Read the actual string value
 		valueLine, _, err := reader.ReadLine()
+		if err != nil {
+			return "", err
+		}
+
+		// Read the CRLF terminator (Redis bulk strings end with \r\n after value)
+		_, _, err = reader.ReadLine()
 		if err != nil {
 			return "", err
 		}
@@ -152,9 +174,6 @@ type JWTChecker struct {
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	// Validasi minimal config
-	if config.SecretName == "" || config.SecretNamespace == "" || config.SecretKey == "" {
-		return nil, fmt.Errorf("secretName, secretNamespace, and secretKey are required")
-	}
 	if len(config.RedisAddresses) == 0 {
 		return nil, fmt.Errorf("redisAddresses is required")
 	}
@@ -167,39 +186,25 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		config.RedisPassword = pw
 	}
 
-	// Cek apakah ini test mode (fallback untuk Plugin Catalog test)
+	// Ambil secret dari environment (untuk production/test mode)
+	secretStr := os.Getenv("JWT_SECRET_VALUE")
 	var secretValue []byte
-
-	// Coba ambil dari environment dulu (untuk test mode)
-	if testSecret := os.Getenv("JWT_SECRET_KEY"); testSecret != "" {
-		secretValue = []byte(testSecret)
+	if secretStr != "" {
+		secretValue = []byte(secretStr)
 	} else {
-		// Ambil secret dari Kubernetes (production mode)
-		k8sConfig, err := rest.InClusterConfig()
-		if err != nil {
-			// Fallback untuk test mode - gunakan dummy secret
-			secretValue = []byte("test-secret-key-for-plugin-catalog-validation-32bytes")
-		} else {
-			clientset, err := kubernetes.NewForConfig(k8sConfig)
-			if err != nil {
-				secretValue = []byte("test-secret-key-for-plugin-catalog-validation-32bytes")
-			} else {
-				secret, err := clientset.CoreV1().Secrets(config.SecretNamespace).Get(ctx, config.SecretName, metav1.GetOptions{})
-				if err != nil {
-					secretValue = []byte("test-secret-key-for-plugin-catalog-validation-32bytes")
-				} else {
-					var ok bool
-					secretValue, ok = secret.Data[config.SecretKey]
-					if !ok {
-						secretValue = []byte("test-secret-key-for-plugin-catalog-validation-32bytes")
-					}
-				}
-			}
-		}
+		// Fallback ke dummy untuk test (e.g., Plugin Catalog)
+		secretValue = []byte("test-secret-key-for-plugin-catalog-validation-32bytes")
+		// Optional: Log warning (gunakan fmt karena no log dep)
+		fmt.Printf("Warning: Using dummy secret for testing. Set JWT_SECRET_VALUE env in production.\n")
+	}
+
+	// Validasi panjang secret
+	if len(secretValue) < 32 {
+		return nil, fmt.Errorf("secret too short: %d bytes (minimum 32 for HS256)", len(secretValue))
 	}
 
 	// Init simple Redis client
-	redisAddr := config.RedisAddresses[0]
+	redisAddr := config.RedisAddresses[0] // TODO: Support multiple addresses with pooling if needed
 	redisClient := newSimpleRedisClient(redisAddr, config.RedisPassword, config.RedisDB)
 
 	return &JWTChecker{
@@ -221,6 +226,7 @@ func (p *JWTChecker) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 	if tokenStr == authHeader {
+		rw.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		http.Error(rw, "Invalid Authorization header", http.StatusUnauthorized)
 		return
 	}
@@ -232,12 +238,14 @@ func (p *JWTChecker) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return p.secret, nil
 	})
 	if err != nil || !token.Valid {
+		rw.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		http.Error(rw, "Invalid JWT", http.StatusUnauthorized)
 		return
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
+		rw.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		http.Error(rw, "Invalid claims", http.StatusUnauthorized)
 		return
 	}
@@ -245,6 +253,7 @@ func (p *JWTChecker) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	uid, uidOk := claims[p.config.UidClaim].(string)
 	jti, jtiOk := claims[p.config.JtiClaim].(string)
 	if !uidOk || !jtiOk || uid == "" || jti == "" {
+		rw.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		http.Error(rw, "Missing uid or jti", http.StatusUnauthorized)
 		return
 	}
@@ -252,11 +261,13 @@ func (p *JWTChecker) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// Cek session di Redis menggunakan simple client
 	cachedJTI, err := p.redisClient.get("session:" + uid)
 	if err != nil {
+		rw.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		http.Error(rw, "Unauthorized: no session", http.StatusUnauthorized)
 		return
 	}
 
 	if cachedJTI != jti {
+		rw.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		http.Error(rw, "Unauthorized: invalid jti", http.StatusUnauthorized)
 		return
 	}
