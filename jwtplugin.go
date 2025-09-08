@@ -56,7 +56,7 @@ func newSimpleRedisClient(addr, password string, db int) *SimpleRedisClient {
 func (r *SimpleRedisClient) get(key string) (string, error) {
 	conn, err := net.DialTimeout("tcp", r.addr, 5*time.Second)
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to Redis: %v", err)
+		return "", fmt.Errorf("failed to connect to redis: %v", err)
 	}
 	defer conn.Close()
 
@@ -81,7 +81,7 @@ func (r *SimpleRedisClient) get(key string) (string, error) {
 		}
 		response := string(line)
 		if !strings.HasPrefix(response, "+") {
-			return "", fmt.Errorf("AUTH failed: %s", response)
+			return "", fmt.Errorf("auth failed: %s", response)
 		}
 	}
 
@@ -101,7 +101,7 @@ func (r *SimpleRedisClient) get(key string) (string, error) {
 		}
 		response := string(line)
 		if !strings.HasPrefix(response, "+") {
-			return "", fmt.Errorf("SELECT failed: %s", response)
+			return "", fmt.Errorf("select failed: %s", response)
 		}
 	}
 
@@ -122,12 +122,12 @@ func (r *SimpleRedisClient) get(key string) (string, error) {
 
 	// Handle error response
 	if strings.HasPrefix(response, "-") {
-		return "", fmt.Errorf("Redis error: %s", strings.TrimPrefix(response, "-"))
+		return "", fmt.Errorf("redis error: %s", strings.TrimPrefix(response, "-"))
 	}
 
 	// Handle simple string (e.g., +OK) - though for GET, it should be bulk
 	if strings.HasPrefix(response, "+") {
-		return "", fmt.Errorf("unexpected simple string for GET: %s", response)
+		return "", fmt.Errorf("unexpected simple string for get: %s", response)
 	}
 
 	// Handle bulk string or null
@@ -175,7 +175,7 @@ type JWTChecker struct {
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	// Validasi minimal config
 	if len(config.RedisAddresses) == 0 {
-		return nil, fmt.Errorf("redisAddresses is required")
+		return nil, fmt.Errorf("redis addresses is required")
 	}
 
 	// Ambil config dari environment kalau ada (override)
@@ -195,12 +195,12 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		// Fallback ke dummy untuk test (e.g., Plugin Catalog)
 		secretValue = []byte("test-secret-key-for-plugin-catalog-validation-32bytes")
 		// Optional: Log warning (gunakan fmt karena no log dep)
-		fmt.Printf("Warning: Using dummy secret for testing. Set JWT_SECRET_VALUE env in production.\n")
+		fmt.Printf("warning: using dummy secret for testing. set JWT_SECRET_VALUE env in production.\n")
 	}
 
 	// Validasi panjang secret
 	if len(secretValue) < 32 {
-		return nil, fmt.Errorf("secret too short: %d bytes (minimum 32 for HS256)", len(secretValue))
+		return nil, fmt.Errorf("secret too short: %d bytes (minimum 32 for hs256)", len(secretValue))
 	}
 
 	// Init simple Redis client
