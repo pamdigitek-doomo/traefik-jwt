@@ -1,4 +1,4 @@
-package jwt_session_checker
+package jwt
 
 import (
 	"bufio"
@@ -38,14 +38,14 @@ func CreateConfig() *Config {
 	}
 }
 
-// Simple Redis client implementation without external dependencies
+// Simple Redis client using only stdlib (no redigo dependency)
 type SimpleRedisClient struct {
 	addr     string
 	password string
 	db       int
 }
 
-func newSimpleRedisClient(addr, password string, db int) *SimpleRedisClient {
+func NewSimpleRedisClient(addr, password string, db int) *SimpleRedisClient {
 	return &SimpleRedisClient{
 		addr:     addr,
 		password: password,
@@ -53,118 +53,101 @@ func newSimpleRedisClient(addr, password string, db int) *SimpleRedisClient {
 	}
 }
 
-func (r *SimpleRedisClient) get(key string) (string, error) {
+func (r *SimpleRedisClient) Get(key string) (string, error) {
 	conn, err := net.DialTimeout("tcp", r.addr, 5*time.Second)
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to redis: %v", err)
+		return "", fmt.Errorf("failed to connect to Redis: %v", err)
 	}
 	defer conn.Close()
 
-	// Set timeout for read/write operations
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
-
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
 
-	// Auth if password is provided
+	// Auth if password provided
 	if r.password != "" {
 		cmd := fmt.Sprintf("*2\r\n$4\r\nAUTH\r\n$%d\r\n%s\r\n", len(r.password), r.password)
-		if _, err := writer.WriteString(cmd); err != nil {
+		_, err = writer.WriteString(cmd)
+		if err != nil {
 			return "", err
 		}
 		writer.Flush()
 
-		// Read AUTH response
 		line, _, err := reader.ReadLine()
 		if err != nil {
 			return "", err
 		}
-		response := string(line)
-		if !strings.HasPrefix(response, "+") {
-			return "", fmt.Errorf("auth failed: %s", response)
+		resp := string(line)
+		if !strings.HasPrefix(resp, "+OK") && !strings.HasPrefix(resp, "+") {
+			return "", fmt.Errorf("AUTH failed: %s", resp)
 		}
 	}
 
-	// Select database if not 0
+	// Select DB if not 0
 	if r.db != 0 {
 		dbStr := strconv.Itoa(r.db)
 		cmd := fmt.Sprintf("*2\r\n$6\r\nSELECT\r\n$%d\r\n%s\r\n", len(dbStr), dbStr)
-		if _, err := writer.WriteString(cmd); err != nil {
+		_, err = writer.WriteString(cmd)
+		if err != nil {
 			return "", err
 		}
 		writer.Flush()
 
-		// Read SELECT response
 		line, _, err := reader.ReadLine()
 		if err != nil {
 			return "", err
 		}
-		response := string(line)
-		if !strings.HasPrefix(response, "+") {
-			return "", fmt.Errorf("select failed: %s", response)
+		resp := string(line)
+		if !strings.HasPrefix(resp, "+OK") && !strings.HasPrefix(resp, "+") {
+			return "", fmt.Errorf("SELECT failed: %s", resp)
 		}
 	}
 
-	// Send GET command
+	// GET command
 	cmd := fmt.Sprintf("*2\r\n$3\r\nGET\r\n$%d\r\n%s\r\n", len(key), key)
-	if _, err := writer.WriteString(cmd); err != nil {
+	_, err = writer.WriteString(cmd)
+	if err != nil {
 		return "", err
 	}
 	writer.Flush()
 
-	// Read response
+	// Parse response
 	line, _, err := reader.ReadLine()
 	if err != nil {
 		return "", err
 	}
+	resp := string(line)
 
-	response := string(line)
-
-	// Handle error response
-	if strings.HasPrefix(response, "-") {
-		return "", fmt.Errorf("redis error: %s", strings.TrimPrefix(response, "-"))
+	if strings.HasPrefix(resp, "-") {
+		return "", fmt.Errorf("redis error: %s", strings.TrimPrefix(resp, "-"))
 	}
-
-	// Handle simple string (e.g., +OK) - though for GET, it should be bulk
-	if strings.HasPrefix(response, "+") {
-		return "", fmt.Errorf("unexpected simple string for get: %s", response)
+	if strings.HasPrefix(resp, "+") {
+		return "", fmt.Errorf("unexpected simple string for GET: %s", resp)
 	}
-
-	// Handle bulk string or null
-	if strings.HasPrefix(response, "$") {
-		if strings.HasPrefix(response, "$-1") {
+	if strings.HasPrefix(resp, "$") {
+		if strings.HasPrefix(resp, "$-1") {
 			return "", fmt.Errorf("key not found")
 		}
-
-		lengthStr := strings.TrimPrefix(response, "$")
+		lengthStr := strings.TrimPrefix(resp, "$")
 		length, err := strconv.Atoi(lengthStr)
-		if err != nil {
-			return "", fmt.Errorf("invalid bulk length: %v", err)
+		if err != nil || length < 0 {
+			return "", fmt.Errorf("invalid bulk length: %s", lengthStr)
 		}
-
-		if length < 0 {
-			return "", fmt.Errorf("key not found or negative length")
-		}
-
-		// Read the actual string value
 		valueLine, _, err := reader.ReadLine()
 		if err != nil {
 			return "", err
 		}
-
-		// Read the CRLF terminator (Redis bulk strings end with \r\n after value)
+		// Consume CRLF terminator
 		_, _, err = reader.ReadLine()
 		if err != nil {
 			return "", err
 		}
-
 		return string(valueLine), nil
 	}
-
-	return "", fmt.Errorf("unexpected response format: %s", response)
+	return "", fmt.Errorf("unexpected response: %s", resp)
 }
 
-type JWTChecker struct {
+type JWTPlugin struct {
 	next        http.Handler
 	name        string
 	config      *Config
@@ -173,12 +156,11 @@ type JWTChecker struct {
 }
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
-	// Validasi minimal config
 	if len(config.RedisAddresses) == 0 {
-		return nil, fmt.Errorf("redis addresses is required")
+		return nil, fmt.Errorf("redisAddresses is required")
 	}
 
-	// Ambil config dari environment kalau ada (override)
+	// Override from env if set
 	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
 		config.RedisAddresses = []string{addr}
 	}
@@ -186,28 +168,25 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		config.RedisPassword = pw
 	}
 
-	// Ambil secret dari environment (untuk production/test mode)
+	// Get secret from env (production/test)
 	secretStr := os.Getenv("JWT_SECRET_VALUE")
 	var secretValue []byte
 	if secretStr != "" {
 		secretValue = []byte(secretStr)
 	} else {
-		// Fallback ke dummy untuk test (e.g., Plugin Catalog)
 		secretValue = []byte("test-secret-key-for-plugin-catalog-validation-32bytes")
-		// Optional: Log warning (gunakan fmt karena no log dep)
-		fmt.Printf("warning: using dummy secret for testing. set JWT_SECRET_VALUE env in production.\n")
+		fmt.Printf("Warning: Using dummy secret for testing. Set JWT_SECRET_VALUE env in production.\n")
 	}
 
-	// Validasi panjang secret
 	if len(secretValue) < 32 {
-		return nil, fmt.Errorf("secret too short: %d bytes (minimum 32 for hs256)", len(secretValue))
+		return nil, fmt.Errorf("secret too short: %d bytes (minimum 32 for HS256)", len(secretValue))
 	}
 
-	// Init simple Redis client
-	redisAddr := config.RedisAddresses[0] // TODO: Support multiple addresses with pooling if needed
-	redisClient := newSimpleRedisClient(redisAddr, config.RedisPassword, config.RedisDB)
+	// Init Redis client (use first address)
+	redisAddr := config.RedisAddresses[0]
+	redisClient := NewSimpleRedisClient(redisAddr, config.RedisPassword, config.RedisDB)
 
-	return &JWTChecker{
+	return &JWTPlugin{
 		next:        next,
 		name:        name,
 		config:      config,
@@ -216,10 +195,9 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}, nil
 }
 
-func (p *JWTChecker) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+func (p *JWTPlugin) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	authHeader := req.Header.Get("Authorization")
 	if authHeader == "" {
-		// Tidak ada JWT → teruskan ke backend
 		p.next.ServeHTTP(rw, req)
 		return
 	}
@@ -258,8 +236,8 @@ func (p *JWTChecker) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Cek session di Redis menggunakan simple client
-	cachedJTI, err := p.redisClient.get("session:" + uid)
+	// Check session in Redis
+	cachedJTI, err := p.redisClient.Get("session:" + uid)
 	if err != nil {
 		rw.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		http.Error(rw, "Unauthorized: no session", http.StatusUnauthorized)
@@ -272,6 +250,6 @@ func (p *JWTChecker) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Lolos → teruskan ke backend
+	// Pass to next handler
 	p.next.ServeHTTP(rw, req)
 }
