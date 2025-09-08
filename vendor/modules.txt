@@ -28,9 +28,6 @@ github.com/gogo/protobuf/sortkeys
 # github.com/golang-jwt/jwt/v5 v5.3.0
 ## explicit; go 1.21
 github.com/golang-jwt/jwt/v5
-# github.com/gomodule/redigo v1.9.2
-## explicit; go 1.17
-github.com/gomodule/redigo/redis
 # github.com/google/gnostic-models v0.7.0
 ## explicit; go 1.22
 github.com/google/gnostic-models/compiler
