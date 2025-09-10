@@ -1,4 +1,4 @@
-package jwt
+package traefik_jwt // Changed from 'package jwt' to match module path
 
 import (
 	"bufio"
