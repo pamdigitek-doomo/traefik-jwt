@@ -18,8 +18,8 @@ To install the plugin, add the following configuration to your static Traefik co
 experimental:
   plugins:
     jwt-auth:
-      moduleName: "github.com/your-username/your-repo-name" # Replace with your GitHub repository path
-      version: "v1.0.0" # Use a specific version tag
+      moduleName: "github.com/pamdigitek-doomo/traefik-jwt" # Replace with your GitHub repository path
+      version: "v0.1.11" # Use a specific version tag
 ```
 
 ## Configuration
