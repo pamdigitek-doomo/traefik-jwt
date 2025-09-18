@@ -17,30 +17,24 @@ import (
 )
 
 type Config struct {
-	SecretName      string   `json:"secretName,omitempty"`
-	SecretNamespace string   `json:"secretNamespace,omitempty"`
-	SecretKey       string   `json:"secretKey,omitempty"`
-	RedisAddresses  []string `json:"redisAddresses,omitempty"`
-	RedisPassword   string   `json:"redisPassword,omitempty"`
-	RedisDB         int      `json:"redisDB,omitempty"`
-	UidClaim        string   `json:"uidClaim,omitempty"`
-	JtiClaim        string   `json:"jtiClaim,omitempty"`
-	RequiredClaims  []string `json:"requiredClaims,omitempty"`
-	RolesClaim      string   `json:"rolesClaim,omitempty"`
+	RedisAddresses []string `json:"redisAddresses,omitempty"`
+	RedisPassword  string   `json:"redisPassword,omitempty"`
+	RedisDB        int      `json:"redisDB,omitempty"`
+	UidClaim       string   `json:"uidClaim,omitempty"`
+	JtiClaim       string   `json:"jtiClaim,omitempty"`
+	RequiredClaims []string `json:"requiredClaims,omitempty"`
+	RolesClaim     string   `json:"rolesClaim,omitempty"`
 }
 
 func CreateConfig() *Config {
 	return &Config{
-		SecretName:      "jwt-secret",
-		SecretNamespace: "default",
-		SecretKey:       "jwt-secret-key",
-		RedisAddresses:  []string{"redis:6379"},
-		RedisPassword:   "",
-		RedisDB:         0,
-		UidClaim:        "uid",
-		JtiClaim:        "jti",
-		RequiredClaims:  []string{},
-		RolesClaim:      "",
+		RedisAddresses: []string{"redis:6379"},
+		RedisPassword:  "",
+		RedisDB:        0,
+		UidClaim:       "uid",
+		JtiClaim:       "jti",
+		RequiredClaims: []string{},
+		RolesClaim:     "",
 	}
 }
 
@@ -326,6 +320,9 @@ func (p *JWTPlugin) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	cachedJTI, err := p.redisClient.Get("session:" + claims.Uid)
 	if err != nil {
 		rw.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+		rw.Header().Set("X-Debug-Uid", claims.Uid)
+		rw.Header().Set("X-Debug-Jti", claims.Jti)
+		rw.Header().Set("X-Debug-Server", p.redisClient.addr)
 		http.Error(rw, "Unauthorized: no session", http.StatusUnauthorized)
 		return
 	}
