@@ -322,6 +322,7 @@ func (p *JWTPlugin) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		rw.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		rw.Header().Set("X-Debug-Uid", claims.Uid)
 		rw.Header().Set("X-Debug-Jti", claims.Jti)
+		rw.Header().Set("X-Err-Data", err.Error())
 		rw.Header().Set("X-Debug-Server", p.redisClient.addr)
 		http.Error(rw, "Unauthorized: no session", http.StatusUnauthorized)
 		return
