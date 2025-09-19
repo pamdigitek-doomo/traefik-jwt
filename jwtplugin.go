@@ -1,17 +1,14 @@
 package traefik_jwt
 
 import (
-	"bufio"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -139,119 +136,119 @@ func generateSignature(message string, secret []byte) string {
 }
 
 // Simple Redis client using only stdlib
-type SimpleRedisClient struct {
-	addr     string
-	password string
-	db       int
-}
+// type SimpleRedisClient struct {
+// 	addr     string
+// 	password string
+// 	db       int
+// }
 
-func NewSimpleRedisClient(addr, password string, db int) *SimpleRedisClient {
-	return &SimpleRedisClient{
-		addr:     addr,
-		password: password,
-		db:       db,
-	}
-}
+// func NewSimpleRedisClient(addr, password string, db int) *SimpleRedisClient {
+// 	return &SimpleRedisClient{
+// 		addr:     addr,
+// 		password: password,
+// 		db:       db,
+// 	}
+// }
 
-func (r *SimpleRedisClient) Get(key string) (string, error) {
-	conn, err := net.DialTimeout("tcp", r.addr, 5*time.Second)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to Redis: %v", err)
-	}
-	defer conn.Close()
+// func (r *SimpleRedisClient) Get(key string) (string, error) {
+// 	conn, err := net.DialTimeout("tcp", r.addr, 5*time.Second)
+// 	if err != nil {
+// 		return "", fmt.Errorf("failed to connect to Redis: %v", err)
+// 	}
+// 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	reader := bufio.NewReader(conn)
-	writer := bufio.NewWriter(conn)
+// 	conn.SetDeadline(time.Now().Add(5 * time.Second))
+// 	reader := bufio.NewReader(conn)
+// 	writer := bufio.NewWriter(conn)
 
-	// Auth if password provided
-	if r.password != "" {
-		cmd := fmt.Sprintf("*2\r\n$4\r\nAUTH\r\n$%d\r\n%s\r\n", len(r.password), r.password)
-		_, err = writer.WriteString(cmd)
-		if err != nil {
-			return "", err
-		}
-		writer.Flush()
+// 	// Auth if password provided
+// 	if r.password != "" {
+// 		cmd := fmt.Sprintf("*2\r\n$4\r\nAUTH\r\n$%d\r\n%s\r\n", len(r.password), r.password)
+// 		_, err = writer.WriteString(cmd)
+// 		if err != nil {
+// 			return "", err
+// 		}
+// 		writer.Flush()
 
-		line, _, err := reader.ReadLine()
-		if err != nil {
-			return "", err
-		}
-		resp := string(line)
-		if !strings.HasPrefix(resp, "+OK") && !strings.HasPrefix(resp, "+") {
-			return "", fmt.Errorf("AUTH failed: %s", resp)
-		}
-	}
+// 		line, _, err := reader.ReadLine()
+// 		if err != nil {
+// 			return "", err
+// 		}
+// 		resp := string(line)
+// 		if !strings.HasPrefix(resp, "+OK") && !strings.HasPrefix(resp, "+") {
+// 			return "", fmt.Errorf("AUTH failed: %s", resp)
+// 		}
+// 	}
 
-	// Select DB if not 0
-	if r.db != 0 {
-		dbStr := strconv.Itoa(r.db)
-		cmd := fmt.Sprintf("*2\r\n$6\r\nSELECT\r\n$%d\r\n%s\r\n", len(dbStr), dbStr)
-		_, err = writer.WriteString(cmd)
-		if err != nil {
-			return "", err
-		}
-		writer.Flush()
+// 	// Select DB if not 0
+// 	if r.db != 0 {
+// 		dbStr := strconv.Itoa(r.db)
+// 		cmd := fmt.Sprintf("*2\r\n$6\r\nSELECT\r\n$%d\r\n%s\r\n", len(dbStr), dbStr)
+// 		_, err = writer.WriteString(cmd)
+// 		if err != nil {
+// 			return "", err
+// 		}
+// 		writer.Flush()
 
-		line, _, err := reader.ReadLine()
-		if err != nil {
-			return "", err
-		}
-		resp := string(line)
-		if !strings.HasPrefix(resp, "+OK") && !strings.HasPrefix(resp, "+") {
-			return "", fmt.Errorf("SELECT failed: %s", resp)
-		}
-	}
+// 		line, _, err := reader.ReadLine()
+// 		if err != nil {
+// 			return "", err
+// 		}
+// 		resp := string(line)
+// 		if !strings.HasPrefix(resp, "+OK") && !strings.HasPrefix(resp, "+") {
+// 			return "", fmt.Errorf("SELECT failed: %s", resp)
+// 		}
+// 	}
 
-	// GET command
-	cmd := fmt.Sprintf("*2\r\n$3\r\nGET\r\n$%d\r\n%s\r\n", len(key), key)
-	_, err = writer.WriteString(cmd)
-	if err != nil {
-		return "", err
-	}
-	writer.Flush()
+// 	// GET command
+// 	cmd := fmt.Sprintf("*2\r\n$3\r\nGET\r\n$%d\r\n%s\r\n", len(key), key)
+// 	_, err = writer.WriteString(cmd)
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	writer.Flush()
 
-	// Parse response
-	line, _, err := reader.ReadLine()
-	if err != nil {
-		return "", err
-	}
-	resp := string(line)
+// 	// Parse response
+// 	line, _, err := reader.ReadLine()
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	resp := string(line)
 
-	if strings.HasPrefix(resp, "-") {
-		return "", fmt.Errorf("redis error: %s", strings.TrimPrefix(resp, "-"))
-	}
-	if strings.HasPrefix(resp, "+") {
-		return "", fmt.Errorf("unexpected simple string for GET: %s", resp)
-	}
-	if strings.HasPrefix(resp, "$") {
-		if strings.HasPrefix(resp, "$-1") {
-			return "", fmt.Errorf("key not found")
-		}
-		lengthStr := strings.TrimPrefix(resp, "$")
-		length, err := strconv.Atoi(lengthStr)
-		if err != nil || length < 0 {
-			return "", fmt.Errorf("invalid bulk length: %s", lengthStr)
-		}
-		valueLine, _, err := reader.ReadLine()
-		if err != nil {
-			return "", err
-		}
-		// Consume CRLF terminator
-		_, _, err = reader.ReadLine()
-		if err != nil {
-			return "", err
-		}
-		return string(valueLine), nil
-	}
-	return "", fmt.Errorf("unexpected response: %s", resp)
-}
+// 	if strings.HasPrefix(resp, "-") {
+// 		return "", fmt.Errorf("redis error: %s", strings.TrimPrefix(resp, "-"))
+// 	}
+// 	if strings.HasPrefix(resp, "+") {
+// 		return "", fmt.Errorf("unexpected simple string for GET: %s", resp)
+// 	}
+// 	if strings.HasPrefix(resp, "$") {
+// 		if strings.HasPrefix(resp, "$-1") {
+// 			return "", fmt.Errorf("key not found")
+// 		}
+// 		lengthStr := strings.TrimPrefix(resp, "$")
+// 		length, err := strconv.Atoi(lengthStr)
+// 		if err != nil || length < 0 {
+// 			return "", fmt.Errorf("invalid bulk length: %s", lengthStr)
+// 		}
+// 		valueLine, _, err := reader.ReadLine()
+// 		if err != nil {
+// 			return "", err
+// 		}
+// 		// Consume CRLF terminator
+// 		_, _, err = reader.ReadLine()
+// 		if err != nil {
+// 			return "", err
+// 		}
+// 		return string(valueLine), nil
+// 	}
+// 	return "", fmt.Errorf("unexpected response: %s", resp)
+// }
 
 type JWTPlugin struct {
 	next        http.Handler
 	name        string
 	config      *Config
-	redisClient *SimpleRedisClient
+	redisClient *ImprovedRedisClient // *SimpleRedisClient
 	secret      []byte
 }
 
@@ -284,7 +281,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	// Init Redis client (use first address)
 	redisAddr := config.RedisAddresses[0]
-	redisClient := NewSimpleRedisClient(redisAddr, config.RedisPassword, config.RedisDB)
+	redisClient := NewImprovedRedisClient(redisAddr, config.RedisPassword, config.RedisDB)
 
 	return &JWTPlugin{
 		next:        next,
