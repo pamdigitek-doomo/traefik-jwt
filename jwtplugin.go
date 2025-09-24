@@ -331,6 +331,8 @@ func (p *JWTPlugin) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		rw.Header().Set("X-Debug-Jti", claims.Jti)
 		rw.Header().Set("X-Debug-Server", p.redisClient.addr)
 		http.Error(rw, "Unauthorized: invalid jti", http.StatusUnauthorized)
+		fmt.Println("UID: ", claims.Uid)
+		fmt.Println("JTI: ", claims.Jti)
 		return
 	}
 
